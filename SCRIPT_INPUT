@@ -1,0 +1,304 @@
+install.packages("mice")
+install.packages(c("lme4", "lmerTest", "emmeans"))
+install.packages("Hmisc")
+library(nanoparquet)
+library(lmerTest)  
+library(emmeans)   
+library(tidyverse)
+library(ggplot2)
+library(skimr)
+library(janitor)
+library(here)
+library(lubridate)
+library(rio)
+library(gtsummary)
+library(Hmisc)
+library(mice)
+library(arrow)
+library(dplyr)
+library(stringr)
+library(mice)
+library(nnet)   # necessário para multinomial (polyreg)
+library(parallel)
+library(doParallel)
+
+
+#==============HABILITANDO DEMAIS NUCLEOS DO PROCESSADOR================
+
+
+#==============IMPORTANDO ARQUIVO PROCESSADO PELOS SCRIPTS==============================================================
+INFLUENZA_INPUT <-  read_parquet("C:/Users/xgx/Documents/INFLUENZA_2026/data_/data_final/INFLUENZA_FULL_FINAL.parquet")
+
+
+unique(INFLUENZA_INPUT$regiao)
+
+view(INFLUENZA_INPUT)
+#==============VARIAVEIS QUE PARTICIPARAO DA IMPUTAÇÃO, INCLUI INDEX PARA DEPOIS FAZER JOIN===========
+
+
+
+
+#============== MODIFICANDO OS NIVEIS DAS VARIAVEIS =====================================
+
+#BINARIAS
+
+INFLUENZA_INPUT <- INFLUENZA_INPUT %>%
+  mutate(
+    sex  = ifelse(cs_sexo == "Male", 1, ifelse(cs_sexo == "NA", NA, 0)),
+    icu  = ifelse(uti == "1", 1, ifelse(uti == "NA", NA, 0)),
+    sari = ifelse(srag_original == "Yes", 1, ifelse(srag_original == "NA", NA, 0)),
+    h_out = ifelse(evolucao == "Death", 1, 0)
+  )
+
+
+
+INFLUENZA_INPUT <- INFLUENZA_INPUT %>%
+  mutate(
+    capital = case_when(
+      is_capital == "No"  ~ 0,
+      is_capital == "Yes" ~ 1,
+      TRUE ~ NA_real_
+      
+    )
+  )
+
+INFLUENZA_INPUT <- INFLUENZA_INPUT %>%
+  mutate(across(ends_with("_m"),
+                ~ case_when(
+                  . == "Yes" ~ 1,
+                  . == "No"  ~ 0,
+                  . == "NA"  ~ NA_real_,
+                  TRUE ~ NA_real_
+                ),
+                .names = "{.col}_m2"))
+
+#MULTINOMIAIS, NOMIAIS
+INFLUENZA_INPUT <- INFLUENZA_INPUT %>%
+  mutate(
+    race = case_when(
+      cs_raca == "White"          ~ 0,
+      cs_raca == "Black/Mixed"    ~ 1,
+      cs_raca == "Asian"          ~ 2,
+      cs_raca == "Indigenous"     ~ 3,
+      TRUE                        ~ NA_real_
+    )
+  )
+
+INFLUENZA_INPUT <- INFLUENZA_INPUT %>%
+  mutate(
+    resp_sup = case_when(
+      suport_ven == "No"                  ~ 0,
+      suport_ven == "Yes, non-invasive"   ~ 1,
+      suport_ven == "Yes, invasive"       ~ 2,
+      TRUE                                ~ NA_real_
+    )
+  )
+
+INFLUENZA_INPUT <- INFLUENZA_INPUT %>%
+  mutate(
+    region = case_when(
+      regiao == "Sudeste"     ~ 0,
+      regiao == "Nordeste"     ~ 1,
+      regiao == "Sul"         ~ 2,
+      regiao == "Centro-Oeste"  ~ 3,
+      regiao == "Norte"         ~ 4,
+      TRUE                      ~ NA_real_
+    )
+  )
+
+#ORDINAIS
+
+INFLUENZA_INPUT <- INFLUENZA_INPUT %>%
+  mutate(
+    age_cat = case_when(
+      faixa_idade == "18-39" ~ 0,
+      faixa_idade == "40-49" ~ 1,
+      faixa_idade == "50-59" ~ 2,
+      faixa_idade == "60-69" ~ 3,
+      faixa_idade == "70-79" ~ 4,
+      faixa_idade == "80+"   ~ 5,
+      TRUE                   ~ NA_real_
+    )
+  )
+
+
+INFLUENZA_INPUT <- INFLUENZA_INPUT %>%
+  mutate(
+    time_symptoms_hosp = as.character(time_symptoms_hosp),
+    time_symptoms_hosp = na_if(time_symptoms_hosp, "NA"),
+    time_symptoms_hosp = as.numeric(time_symptoms_hosp),
+    
+    time_sh = case_when(
+      time_symptoms_hosp <= 3  ~ 0,
+      time_symptoms_hosp <= 6  ~ 1,
+      time_symptoms_hosp <= 9  ~ 2,
+      time_symptoms_hosp <= 12 ~ 3,
+      time_symptoms_hosp <= 15 ~ 4,
+      time_symptoms_hosp > 15  ~ 5,
+      TRUE                     ~ NA_real_
+    )
+  )
+
+
+
+
+#==============CONVERTENDO PARA FATOR E ESPECIFICANDO LEVELS=================================================================
+
+INFLUENZA_INPUT <- INFLUENZA_INPUT %>%
+  mutate(
+    #BINARIAS
+    sex = factor(sex, levels = c(0,1)),
+    sari  = factor(sari, levels = c(0,1)),
+    h_out = factor(h_out, levels = c(0,1)),
+    capital = factor(capital, levels = 0:1),
+    
+    across(ends_with("_m2"),
+           ~ factor(.x, levels = c(0,1))),
+    #MULTINOMIAIS, NOMIAIS
+    race      = factor(race, levels = 0:3),
+    resp_sup  = factor(resp_sup, levels = 0:2),
+    region    = factor(region, levels = 0:4),
+    age_cat = factor(age_cat, levels = 0:5),
+    time_sh = factor(time_sh, levels = 0:5),
+    
+    sem_pri = as.numeric(sem_pri),
+    
+  )
+#====================================================================
+# Missing data were handled using multiple imputation by chained equations 
+# under a missing at random assumption. Thirty imputed datasets were generated
+# using logistic and multinomial logistic regression models according to 
+# variable type. Imputation models included demographic, clinical, and regional
+# predictors associated with missingness. Estimates were combined 
+# using Rubin’s rules.
+
+#====================INICIANDO MODELO PARA IMPUTAÇÂO=================
+
+ini  <- mice(INFLUENZA_INPUT, maxit = 0)
+meth <- ini$method
+pred <- ini$predictorMatrix
+meth[] <- ""
+
+#====================INICIANDO MODELO PARA IMPUTAÇÂO=================
+
+vars_logit <- c("sex","sari",
+                "cardiopati_m_m2","hematologi_m_m2","hepatica_m_m2","diabetes_m_m2",
+                "neurologic_m_m2","pneumopati_m_m2","imunodepre_m_m2",
+                "renal_m_m2","obesidade_m_m2",  "asma_m_m2", "sind_down_m_m2", "puerpera_m_m2",
+                "saturacao_m_m2","desc_resp_m_m2","dispneia_m_m2","out_morbi_m_m2")
+meth[vars_logit] <- "logreg" # regressão logística binária
+
+
+vars_mlogit <- c("resp_sup","race","time_sh")
+meth[vars_mlogit] <- "polyreg"
+
+
+#VARIAVEIS COMMPLETAS NAO IMPUTADAS
+vars_regular <- c("index","evolucao","sem_pri",
+                  "age_cat","nu_idade_n",
+                  "capital","region","h_out")
+
+meth[vars_regular] <- ""
+
+#Ajustar matriz de preditores
+
+pred[,] <- 0
+
+predictors_used <- c("h_out","age_cat","sem_pri","capital","region","nu_idade_n")
+
+pred[vars_logit, predictors_used]  <- 1
+pred[vars_mlogit, predictors_used] <- 1
+
+#Garantir que variável não se prediga:
+diag(pred) <- 0
+
+options(mice.nnet.maxit = 50)
+options(mice.nnet.trace = FALSE)
+
+
+
+#Rodar imputação (equivalente ao mi impute chained)
+
+imp <- mice(INFLUENZA_INPUT,
+            m = 20,
+            method = meth,
+            predictorMatrix = pred,
+            maxit = 5, #talvez fazer 5 iterações seja suficiente para banco grande
+            seed = 2020,
+            printFlag = TRUE,
+            n.core = parallel::detectCores() - 1
+                        )
+
+
+imp$loggedEvents
+
+#Avaliar convergência
+plot(imp)
+plot(imp, c("cardiopati_m_m2","diabetes_m_m2"))
+densityplot(imp, ~ cardiopati_m_m2)
+stripplot(imp, cardiopati_m_m2 ~ .imp)
+#Extrair base completa
+#completed_data <- complete(imp, action = "long", include = TRUE)
+#meth[meth != ""]
+
+imp
+imp$loggedEvents
+densityplot(imp)
+
+densityplot(imp, ~ cardiopati_m_m2)
+
+
+base_long <- mice::complete(imp, action = "long", include = FALSE)
+
+write.csv(base_long, "influenza_imput_long.csv", row.names = FALSE)
+
+arrow::write_parquet(base_long,
+                     "C:/Users/xgx/Documents/INFLUENZA_2026/data_/data_final/INFLUENZA_imput_long.parquet")
+
+getwd()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#====================
+# Etapa 1 — Análise do Padrão de Missing
+# 2.1 Proporção de missing por variável
+
+prop_miss <- colMeans(is.na(INFLUENZA_INPUT))
+sort(prop_miss, decreasing = TRUE)
+
+# 2.2 Teste de associação MAR
+
+# Para cada variável _m_m2:
+  
+  vars_miss <- grep("_m_m2$", names(INFLUENZA_INPUT), value = TRUE)
+
+results_mar <- lapply(vars_miss, function(v){
+  
+  miss_var <- as.numeric(is.na(INFLUENZA_INPUT[[v]]))
+  
+  fit <- glm(miss_var ~ age_cat + sex + region + h_out + capital,
+             family = binomial,
+             data = INFLUENZA_INPUT)
+  
+  data.frame(
+    variable = v,
+    AIC = AIC(fit),
+    McFadden_R2 = 1 - fit$deviance/fit$null.deviance
+  )
+})
+
+do.call(rbind, results_mar)
