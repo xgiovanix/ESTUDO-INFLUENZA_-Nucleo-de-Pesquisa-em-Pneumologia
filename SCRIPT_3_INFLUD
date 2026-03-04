@@ -1,0 +1,386 @@
+# ======================== 3 - SCRIPT_INFLUENZA_FULL_FINAL - INICIO =====================================
+# ADAPTAÇÃO: Giovani B Costa – Estudo INFLUENZA
+# DATA: 13/02/2026 (atualizado em 16/02/2026)
+# OBJETIVO: 
+#   - Padronização de nomes de colunas (clean_names)
+#   - Remoção de variáveis não utilizadas (sintomas, óbitos específicos, vírus não-Influenza)
+#   - Reorganização da ordem das colunas por domínio (identificação, localização, tempo, demografia, etc.)
+#   - Criação de variáveis derivadas (uti_class_obito, imputação de UF)
+#   - Identificação e remoção de casos com tempo de internação >365 dias ou negativo
+#   - Exportação da base final "INFLUENZA_FULL"
+# =============================================================================================================
+
+
+getwd()
+setwd("C:/Users/xgx/Documents/INFLUENZA_2026/data/TABELAS_GERADAS/")
+# ====================  IMPORTANDO TABELA  =================================================================
+A <-  read_parquet("C:/Users/xgx/Documents/INFLUENZA_2026/data/TABELAS_GERADAS/INFLUENZA_FULL2.parquet")
+head(A)
+view(A)
+## ==================== PARONIZANDO NOME DAS COLUNAS ========================================================
+A <- A %>% 
+  clean_names
+## ==================== VERIFICANDO NOME DAS VARIAVEIS -=====================================================
+names(A)[grepl("obito", names(A))]
+names(A)[grepl(
+  "obito|febre|dispneia|diarreia|pcr_sars2|soma_casos|n_detectado|_unico|garganta|outro_sin_m|tosse|desc_resp|vomito|pcr_resul|investigacao|srag_original|outro_sin",
+  names(A)
+)]
+
+
+## ====================   RETIRANDO SINTOMAS E VARIAVEIS DE OBITOS ESPECIFICAS POR VIRUS ===================
+A <- A %>% 
+  select(-contains("obito")) %>% 
+  select(-matches(
+    "obito|febre|diarreia|pcr_sars2|soma_casos|n_detectado|_unico|garganta|outro_sin_m|tosse|vomito|pcr_resul|investigacao|outro_sin"
+  )
+  )
+
+### ==================== RETIRANDO DEMAIS VIRUS NAO INFLUENZA-==============================================
+A <- A %>%
+  select(-matches(
+    "parainfluenza_caso|vsr_caso|adenovirus_caso|metapneumo_caso|srag_total_casos|rinovirus_caso|bocavirus_caso"
+  ))
+
+view(A)
+
+### ====================  REORDENANDO AS VARIAVEIS ===================================
+A <- A %>%
+  select(
+    
+    # 1 Identificação
+    index,
+    
+    # 2 Localização
+    regiao, sg_uf, sg_uf_inte, id_municip, co_mun_res, co_mu_inte,
+    capital, is_capital,
+    
+    # 3 Tempo
+    ano, ano_se_pri,
+    dt_notific, dt_sin_pri, ano_se_pri, dt_coleta, dt_interna,
+    dt_entuti, dt_saiduti, dt_evoluca,
+    time_symptoms_hosp, time_symptoms_notif,
+    
+    # 4 Demográficos
+    cs_sexo, nu_idade_n, idade_anos, idade_cat,
+    faixa_idade, cs_raca, cs_escol_n,
+    
+    # 5 Gravidade clínica
+    saturacao, saturacao_m, uti, suport_ven,
+    fator_risco, srag_n_especificada, srag_original,
+    
+    # 6 Desfecho
+    evolucao,
+    
+    # 7 Comorbidades originais
+    cardiopati, hematologi, hepatica, diabetes,
+    neurologic, pneumopati, renal, obesidade, dispneia,
+    imunodepre, asma, sind_down, puerpera, out_morbi, desc_resp,
+    
+    # 8 Comorbidades imputadas
+    cardiopati_m, hematologi_m, hepatica_m, diabetes_m,
+    neurologic_m, pneumopati_m, renal_m, obesidade_m,
+    imunodepre_m, asma_m, sind_down_m, puerpera_m, out_morbi_m, dispneia_m, desc_resp_m,
+    
+    # 9 Contadores de comorbidade
+    cont_comorb, n_comorb,
+    cont_comorb_m, n_comorb_m,
+    cont_comorb_mreal, n_comorb_mreal,
+    
+    # 10 Etiologia viral
+    covid_caso,
+    influenza_h1n1_caso, influenza_h3n2_caso,
+    influenza_a_n_subtipavel_caso, influenza_a_n_sub_caso,
+    influenza_a_total,
+    influenza_b_vict_caso, influenza_b_yam_caso,
+    influenza_b_inconclusivo_caso, influenza_b_total,
+    influenza_geral_casos,
+    outros_virus_caso,
+    ovr_caso, codeteccao_casos
+    
+  )
+
+view(A)
+
+
+# ====================  VERIFICANDO A CONCORDANCIA ENTRE UF DOMICILIO E UF INTERNAÇÃO ===================================
+A %>%
+  filter(!is.na(sg_uf_inte)) %>%
+  summarise(
+    concordancia = mean(sg_uf == sg_uf_inte, na.rm = TRUE)
+  ) # = 98%
+
+
+## ====================   IMPUTANDO VARIAVEIS DE LOCAL===================================================================
+A <- A %>%
+  mutate(
+    sg_uf_internacao_obs = sg_uf_inte,
+    sg_uf_internacao_final = coalesce(sg_uf_inte, sg_uf),
+    sg_uf_internacao_imputada = is.na(sg_uf_inte)
+  )
+
+view(A)
+
+## ====================   MOVENDO AS NOVAS VARIVEIS PARA POSIÇÃO PROXIMA A LOCALIDADE====================================
+A <- A %>% 
+  relocate(
+    sg_uf_internacao_obs,
+    sg_uf_internacao_final,
+    sg_uf_internacao_imputada,
+    .after = sg_uf_inte
+  )
+
+class(A$dt_saiduti)
+
+## ====================   AVALIANDO DATA SAIDA UTI========================================================================
+resultado <- A %>%
+  filter(evolucao == "Death",
+         !is.na(dt_evoluca),
+         !is.na(dt_saiduti)) %>%
+  summarise(
+    total_obitos = n(),
+    obito_mesmo_dia_saida_uti = sum(dt_evoluca == dt_saiduti),
+    obito_data_diferente_saida_uti = sum(dt_evoluca != dt_saiduti),
+    proporcao_mesmo_dia = mean(dt_evoluca == dt_saiduti)
+  )
+
+resultado
+
+# total_obitos / obito_mesmo_dia_saida_uti /  obito_data_diferente_saida_uti/   proporcao_mesmo_dia
+#      <int>                     <int>                          <int>               <dbl>
+#      188408                    176063                          12345               0.934
+
+
+
+## ====================   AQUI OPTOU-SE POR CRIAR TRES VAR QUE CLASSIFICA O DESFECHO DE UTI================================
+A <- A %>%
+  mutate(
+    # garantir que são datas (caso ainda não sejam)
+    dt_saiduti   = as.Date(dt_saiduti),
+    dt_evoluca   = as.Date(dt_evoluca),
+    
+    uti_class_obito = case_when(
+      
+      # Óbito confirmado na UTI (coincidência exata de datas)
+      evolucao == "Death" &
+        !is.na(dt_saiduti) &
+        dt_evoluca == dt_saiduti ~ "Obito_uti",
+      
+      # Óbito após saída da UTI (data de evolução posterior à saída)
+      evolucao == "Death" &
+        !is.na(dt_saiduti) &
+        dt_evoluca > dt_saiduti ~ "Obito_pos_uti",
+      
+      # Inconsistência temporal (óbito antes da saída)
+      evolucao == "Death" &
+        !is.na(dt_saiduti) &
+        dt_evoluca < dt_saiduti ~ "inc_temporal",
+      
+      # Óbito com saída de UTI ausente
+      evolucao == "Death" &
+        is.na(dt_saiduti) ~ "Obito_indeterminado",
+      
+      TRUE ~ NA_character_
+    )
+  )
+
+tabyl(A$uti_class_obito)
+
+# # uti_class_obito      n          percent        valid_percent
+# # Obito_indeterminado 108106    0.18821076       0.36458987
+# # Obito_pos_uti       12345     0.02149244       0.04163378
+# # Obito_uti           176063    0.30652277       0.59377635
+# # <NA>                277874    0.48377403       NA
+
+#================ESSA PARTE DO SCRIPT RECRIA A SEMANA EPIDEMIOLOGICA BASEADA SEMANA DOS
+# PRIMEIROS SINTOMAS MAS DE FORMA CONTINUA AO LONGO DOS ANOS
+
+A <- A %>% 
+  mutate(ano_se_pri = as.character(ano_se_pri))
+
+A <- A %>%
+  separate(ano_se_pri, into = c("semana", "ano"), sep = "_", remove = FALSE) %>%
+  mutate(
+    semana = as.numeric(semana),
+    ano = as.numeric(ano),
+    sem_pri = (ano - 2019) * 53 + semana  # sem_pri é a semana contínua
+  )
+
+# Verificar resultado
+A %>%
+  select(ano_se_pri, semana, ano, sem_pri) %>%
+  head()
+
+
+## ====================   ORDENANDO COLUNAS -------------------------------------------------------
+A <-  A %>% 
+  relocate(
+    uti_class_obito,
+    .after = uti
+    
+  )
+
+#================== NESSA ETAPA ESTOU VERIFICANDO CASOS ABSURDOS EM RELAÇAO A DATA DE INTERNAÇÂO E DE EVOLUÇÂO =========
+# ======================================================================================================================
+# SCRIPT  LIMPEZA DE DADOS - REMOÇÃO DE CASOS COM TEMPO DE INTERNAÇÃO >365 DIAS
+# ======================================================================================================================
+# OBJETIVO: Identificar e excluir registros com tempo de internação 
+#           superior a 365 dias, considerados inconsistentes para análise
+#
+# DATASET ENTRADA: A (após merge dos anos 2019-2025)
+# DATASET SAÍDA: A_com_diagnostico - > A -> INFLUENZA (limpo)
+# ARQUIVOS GERADOS: log_remocao_casos_absurdos.csv
+#
+# AUTOR: Giovani B Costa
+# VERSÃO: 2.0
+# DATA: 16/02/2026
+# ========================================================================================================================
+# ESTATÍSTICAS:
+# - Casos iniciais: 574.388
+# - Casos >365 dias removidos: 368 (0,064%)
+# - Casos finais: 574.020
+# ========================================================================================================================
+x <- A
+
+# Identificar os 50 piores casos de internação
+casos_inte_absurdos <- x %>% 
+  filter(!is.na(dt_interna) & !is.na(dt_evoluca)) %>% 
+  mutate(dias_calc = as.integer(dt_evoluca - dt_interna)) %>% 
+  filter(dias_calc > 365 | dias_calc < 0) %>%  # >1 ano ou negativo
+  select(id_municip, dt_interna, dt_evoluca, dias_calc, evolucao, ano) %>% 
+  arrange(desc(dias_calc)) %>% 
+  head(1000)
+
+# Visualizar
+View(casos_inte_absurdos)
+
+# # A tibble: 2 × 7
+# tipo         n     pct media mediana   min   max
+# <chr>    <int>   <dbl> <dbl>   <dbl> <int> <int>
+#   1 > 1 ano    368  0.0661 484.     388.   366  3342
+# 2 Normal  556023 99.9     15.7     11      0   365
+
+
+# PASSO 1: Registrar estado inicial
+n_inicial <- nrow(A)
+cat("========================================\n")
+cat("PROCESSO DE LIMPEZA - CASOS >365 DIAS E NEGATIVOS\n")
+cat("========================================\n")
+cat("Estado inicial:\n")
+cat("  Total de casos:", n_inicial, "\n")
+
+# PASSO 2: Identificar os casos problemáticos
+A_com_diagnostico <- A %>%
+  mutate(
+    dias_calc = as.integer(dt_evoluca - dt_interna),
+    flag_absurdo = !is.na(dias_calc) & (dias_calc > 365 | dias_calc < 0),
+    status = case_when(
+      is.na(dias_calc) ~ "Sem data completa",
+      dias_calc < 0 ~ "Negativo",
+      dias_calc >= 0 & dias_calc <= 365 ~ "Normal (≤365 dias)",
+      dias_calc > 365 ~ "Absurdo (>365 dias)"
+    )
+  )
+
+# PASSO 3: Sumarizar antes da remoção
+sumario_antes <- A_com_diagnostico %>%
+  group_by(status) %>%
+  summarise(
+    n = n(),
+    pct = n / n_inicial * 100
+  )
+
+cat("\nComposição inicial:\n")
+print(sumario_antes)
+
+# PASSO 4: Contar os casos problemáticos
+n_absurdos <- A_com_diagnostico %>%
+  filter(flag_absurdo) %>%
+  nrow()
+
+n_negativos <- A_com_diagnostico %>%
+  filter(!is.na(dias_calc) & dias_calc < 0) %>%
+  nrow()
+
+n_mais_365 <- A_com_diagnostico %>%
+  filter(!is.na(dias_calc) & dias_calc > 365) %>%
+  nrow()
+
+cat("\nCasos problemáticos identificados:\n")
+cat(sprintf("  Negativos (<0 dias): %s\n", format(n_negativos, big.mark=".")))
+cat(sprintf("  >365 dias: %s\n", format(n_mais_365, big.mark=".")))
+cat(sprintf("  TOTAL: %s\n", format(n_absurdos, big.mark=".")))
+
+# PASSO 5: CRIAR A NOVO (LIMPO) - SOBRESCREVENDO O ORIGINAL
+A <- A_com_diagnostico %>%
+  filter(!flag_absurdo) %>%  # Remove os casos problemáticos
+  select(-flag_absurdo, -status, -dias_calc)  # Remove colunas auxiliares
+
+# PASSO 6: Verificar estado final
+n_final <- nrow(A)
+n_removidos <- n_inicial - n_final
+
+cat("\n----------------------------------------\n")
+cat("RESUMO DA LIMPEZA:\n")
+cat("----------------------------------------\n")
+cat(sprintf("Casos iniciais: %s\n", format(n_inicial, big.mark=".")))
+cat(sprintf("Casos problemáticos removidos: %s\n", format(n_removidos, big.mark=".")))
+cat(sprintf("Casos finais: %s\n", format(n_final, big.mark=".")))
+cat(sprintf("Percentual removido: %.3f%%\n", n_removidos/n_inicial*100))
+
+# PASSO 7: Verificar se ainda existem problemas
+verificacao_final <- A %>%
+  mutate(dias_calc = as.integer(dt_evoluca - dt_interna)) %>%
+  summarise(
+    total = n(),
+    negativos = sum(dias_calc < 0, na.rm = TRUE),
+    mais_365 = sum(dias_calc > 365, na.rm = TRUE),
+    com_na = sum(is.na(dias_calc))
+  )
+
+cat("\nVerificação final (após limpeza):\n")
+print(verificacao_final)
+
+# PASSO 8: Reporte para metodologia
+cat("\n========================================\n")
+cat("TEXTO PARA METODOLOGIA:\n")
+cat("========================================\n")
+cat(sprintf("Excluímos %s casos (%.3f%% da amostra) com tempo de internação superior a 365 dias ou negativo, considerados inconsistentes. ", 
+            format(n_removidos, big.mark="."), n_removidos/n_inicial*100))
+cat(sprintf("Desses, %s eram negativos e %s superiores a 365 dias. ", 
+            format(n_negativos, big.mark="."), format(n_mais_365, big.mark=".")))
+cat(sprintf("Os demais %s casos foram mantidos para análise.\n", 
+            format(n_final, big.mark=".")))
+
+# PASSO 9: Salvar log
+log_limpeza <- data.frame(
+  data = Sys.Date(),
+  etapa = c("Inicial", "Após remoção"),
+  n_casos = c(n_inicial, n_final),
+  n_negativos = c(n_negativos, 0),
+  n_mais_365 = c(n_mais_365, 0),
+  total_removidos = c(0, n_removidos),
+  pct_removidos = c(0, round(n_removidos/n_inicial*100, 3))
+)
+
+# Salvar como Excel
+writexl::write_xlsx(log_limpeza, "log_remocao_casos_absurdos.xlsx")
+
+cat("\n✅ Log salvo em 'log_remocao_casos_absurdos.xlsx'\n")
+cat("✅ Dataset 'A' atualizado com", format(n_final, big.mark="."), "casos\n")
+
+
+#==============EXPORTANTO EM CSV E EM PARQUET==============================================================================
+
+INFLUENZA_FULL <- A
+
+#setwd()
+
+write_excel_csv2(INFLUENZA_FULL, 
+                 "INFLUENZA_FULL_v2.csv",
+                 na = "",
+                 append = FALSE)
+
+write_parquet(INFLUENZA_FULL, "INFLUENZA_FULL_v2.parquet")
+
+# ======================== 3 - SCRIPT_INFLUENZA_FULL_FINAL - FINAL =====================================
