@@ -1,0 +1,270 @@
+#===================SCRIPT GERAR MAPAS INFLUENZA
+
+#===================INSTALANDO PACOTES
+
+library(arrow)
+library(geobr)
+library(sf)
+library(tidyverse)
+library(janitor)
+library(gridExtra)
+library(patchwork)
+
+x <- read_parquet("/Users/xgx/Desktop/DOUTORADO/INFLUENZA/INFLUENZA_FULL_FINAL_v2.parquet")
+
+#===================CARREGANDO MAPAS
+map <- geobr::read_state()
+names(map)
+
+#===================FILTRANDO DADOS DO INFLUENZA P MAPA
+vacina_map <- x %>% 
+  select(vacina, sg_uf_internacao_final, ano)
+  
+#===================SUMMARIZANDO ESTATISTICAS
+
+percen_vacinado <- vacina_map %>% 
+  group_by(sg_uf_internacao_final, ano) %>% 
+  summarise(
+    total = n(),
+    vacinados = sum(vacina=="1", na.rm = TRUE),
+    nao_vacinados = sum(vacina=="2", na.rm = TRUE),
+    ignorado = sum(vacina=="9" | is.na(vacina), na.rm = TRUE),
+    porc_vacin = (vacinados/total) * 100,
+    porc_n_vacin = (nao_vacinados/total) * 100,
+    porc_ig_miss = (ignorado/total) * 100
+  )
+
+#===================FAZENDO JUNCAO DADOS MAPAS COM DATASET
+percen_vacinado <- percen_vacinado %>% 
+  rename(abbrev_state=sg_uf_internacao_final)
+  
+map_final <- left_join(map, percen_vacinado)
+
+#===================AJUSTANDO MAPAS COM FILTROS
+
+
+
+lista <- c("mp1","mp2","mp3","mp4","mp5")
+
+fct_map <- function(mapa)
+{
+  
+  
+  
+}
+
+
+
+
+
+# # MAPA VACINADOS
+mp1 <- map_final %>%
+  filter(ano==2019) %>% 
+   ggplot() +
+  geom_sf(aes(fill = porc_vacin), color = "gray40", size = 0.2) +
+  scale_fill_gradient(low = "lightyellow", high = "darkgreen", 
+                      name = "% Vacinados",
+                      na.value = "gray90",
+                      limits = c(0, 50)) +
+  labs(title = "Vacinados contra Gripe - 2019") +
+  theme_minimal()
+  
+  # # MAPA VACINADOS
+  mp2 <- map_final %>%
+    filter(ano==2020) %>% 
+  ggplot() +
+    geom_sf(aes(fill = porc_vacin), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "lightyellow", high = "darkgreen", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 50)) +
+    labs(title = "Vacinados contra Gripe - 2020") +
+    theme_minimal()  
+  
+  
+  # # MAPA VACINADOS
+  mp3 <- map_final %>%
+    filter(ano==2021) %>% 
+  ggplot() +
+    geom_sf(aes(fill = porc_vacin), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "lightyellow", high = "darkgreen", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 50)) +
+    labs(title = "Vacinados contra Gripe - 2021") +
+    theme_minimal()
+  
+  # # MAPA VACINADOS
+  mp4 <- map_final %>%
+    filter(ano==2022) %>% 
+  ggplot() +
+    geom_sf(aes(fill = porc_vacin), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "lightyellow", high = "darkgreen", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 50)) +
+    labs(title = "Vacinados contra Gripe - 2022") +
+    theme_minimal()
+  
+  # # MAPA VACINADOS
+  mp5 <- map_final %>%
+    filter(ano==2023) %>% 
+  ggplot() +
+    geom_sf(aes(fill = porc_vacin), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "lightyellow", high = "darkgreen", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 50)) +
+    labs(title = "Vacinados contra Gripe - 2023") +
+    theme_minimal()
+  
+  
+  # # MAPA VACINADOS
+  mp6 <- map_final %>%
+    filter(ano==2024) %>% 
+  ggplot() +
+    geom_sf(aes(fill = porc_vacin), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "lightyellow", high = "darkgreen", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 50)) +
+    labs(title = "Vacinados contra Gripe - 2024") +
+    theme_minimal()
+  
+  
+  # # MAPA VACINADOS
+  mp7 <- map_final %>%
+    filter(ano==2025) %>% 
+  ggplot() +
+    geom_sf(aes(fill = porc_vacin), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "lightyellow", high = "darkgreen", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 50)) +
+    labs(title = "Vacinados contra Gripe - 2025") +
+    theme_minimal()
+  
+  
+  
+  mp1+mp2+mp3+mp4+mp5+mp6+mp7+plot_layout(nrow = 3, ncol = 3)  
+  
+
+# MAPA MISS
+
+  # # MAPA VACINADOS
+  miss1 <- map_final %>%
+    filter(ano==2019) %>% 
+    ggplot() +
+    geom_sf(aes(fill = porc_ig_miss), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "#FFDF00", high = "#FF6819", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 100)) +
+    labs(title = "Registros ausentes sobre vacina da Gripe - 2019") +
+    theme_minimal()
+
+  miss2 <- map_final %>%
+    filter(ano==2020) %>% 
+    ggplot() +
+    geom_sf(aes(fill = porc_ig_miss), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "#FFDF00", high = "#FF6819", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 100)) +
+    labs(title = "Registros ausentes sobre vacina da Gripe - 2020") +
+    theme_minimal()
+  
+  
+  miss3 <- map_final %>%
+    filter(ano==2021) %>% 
+    ggplot() +
+    geom_sf(aes(fill = porc_ig_miss), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "#FFDF00", high = "#FF6819", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 100)) +
+    labs(title = "Registros ausentes sobre vacina da Gripe - 2021") +
+    theme_minimal()
+  
+  miss4 <- map_final %>%
+    filter(ano==2022) %>% 
+    ggplot() +
+    geom_sf(aes(fill = porc_ig_miss), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "#FFDF00", high = "#FF6819", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 100)) +
+    labs(title = "Registros ausentes sobre vacina da Gripe - 2022") +
+    theme_minimal()
+  
+  miss5 <- map_final %>%
+    filter(ano==2023) %>% 
+    ggplot() +
+    geom_sf(aes(fill = porc_ig_miss), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "#FFDF00", high = "#FF6819", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 100)) +
+    labs(title = "Registros ausentes sobre vacina da Gripe - 2023") +
+    theme_minimal()
+  
+  miss6 <- map_final %>%
+    filter(ano==2024) %>% 
+    ggplot() +
+    geom_sf(aes(fill = porc_ig_miss), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "#FFDF00", high = "#FF6819", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 100)) +
+    labs(title = "Registros ausentes sobre vacina da Gripe - 2024") +
+    theme_minimal()
+  
+  miss7 <- map_final %>%
+    filter(ano==2025) %>% 
+    ggplot() +
+    geom_sf(aes(fill = porc_ig_miss), color = "gray40", size = 0.2) +
+    scale_fill_gradient(low = "#FFDF00", high = "#FF6819", 
+                        name = "% Vacinados",
+                        na.value = "gray90",
+                        limits = c(0, 100)) +
+    labs(title = "Registros ausentes sobre vacina da Gripe - 2025") +
+    theme_minimal()
+  
+  miss1+miss2+miss3+miss4+miss5+miss6+miss7+plot_layout(nrow = 3, ncol = 3)
+  
+#============VERIFICAR DE OS DADOS SAO
+
+
+# 1. Verificar se x tem classe sf
+is_sf <- inherits(x, "sf")
+print(paste("É objeto sf?", is_sf))
+
+# 2. Verificar colunas
+names(x)
+
+# 3. Tentar converter explicitamente
+x_sf <- st_as_sf(x, sf_column_name = "geom")
+
+# 4. Verificar geometrias válidas
+validas <- st_is_valid(x_sf)
+print(paste("Geometrias válidas:", all(validas)))
+
+# Se houver geometrias inválidas, tentar corrigir
+if(!all(validas)) {
+  x_sf <- st_make_valid(x_sf)
+}
+
+# 5. Criar o mapa
+ggplot() +
+  geom_sf(data = x_sf, 
+          aes(fill = idade_anos), 
+          color = "white", 
+          size = 0.2) +
+  scale_fill_gradient(low = "#fee5d9", 
+                      high = "#a50f15",
+                      name = "Idade") +
+  theme_minimal() +
+  labs(title = "Distribuição de Óbitos por Estado",
+       subtitle = "Dados do dataset x",
+       caption = "Fonte: Seus dados")
+
