@@ -1,0 +1,605 @@
+
+#=====================PARTE 01 de 02========================================
+# Resumo do processamento do banco de dados SRAG–Influenza (2015–2018)
+# Autor: Giovani B. Costa
+# Fonte de dados
+# Foram utilizados os bancos do sistema de vigilância de Síndrome Respiratória Aguda Grave (SRAG) referentes ao período 2015–2018, obtidos a partir dos arquivos:
+# INFLUD15.csv
+# INFLUD16.csv
+# INFLUD17.csv
+# INFLUD18.csv
+# Os arquivos foram importados no ambiente R e posteriormente concatenados em uma única base utilizando a função bind_rows() 
+#=============================================================================
+
+library(janitor)
+library(DiagrammeR)
+
+
+#1_IMPORTANDO DADO BRUTO INFLUD
+influd15 <- read.csv("C:/Users/xgx/Documents/INFLUENZA_2026/INFLUENZA/data_/data_original/influd/INFLUD15.csv", sep = ";")
+influd16 <- read.csv("C:/Users/xgx/Documents/INFLUENZA_2026/INFLUENZA/data_/data_original/influd/INFLUD16.csv", sep = ";")
+influd17 <- read.csv("C:/Users/xgx/Documents/INFLUENZA_2026/INFLUENZA/data_/data_original/influd/INFLUD17.csv", sep = ";")
+influd18 <- read.csv("C:/Users/xgx/Documents/INFLUENZA_2026/INFLUENZA/data_/data_original/influd/INFLUD18.csv", sep = ";")
+
+lista <-  list(influd15,influd16,influd17,influd18)
+influenza_old <- bind_rows(lista)
+view(influenza_old)
+n_row1 <- nrow(influenza_old)
+cat("\nNumero e registros totais de 2015 a 2018:", paste0(n_row1))
+
+#2_VERIFICANDO CLASSE VARIAVEIS SRAG
+class(influenza_old$HOSPITAL)
+class(influenza_old$EVOLUCAO)
+class(influenza_old$TOSSE)
+class(influenza_old$GARGANTA)
+class(influenza_old$DISPNEIA)
+class(influenza_old$SATURACAO)
+class(influenza_old$DESC_RESP)
+
+#3_CRIANDO CRITERIO SRAG MIISTERIO SAUDE
+influenza_old <- influenza_old %>%
+  mutate(criterio_1 = (HOSPITAL == 1 | EVOLUCAO == 2)) %>%
+  mutate(criterio_2 = (TOSSE == 1 | GARGANTA == 1)) %>%
+  mutate(criterio_3 = (DISPNEIA == 1 | SATURACAO == 1 | DESC_RESP == 1)) %>%
+  mutate(caso_srag = (criterio_1 & criterio_2 & criterio_3)) %>%
+  filter(caso_srag == 1)
+
+n_row2 <- nrow(influenza_old)
+cat("\nNumero e registros totais com SRAG de 2015 a 2018:", paste0(n_row2))
+
+#4_CRIANDO VARIAVEIS COMPATIVEIS INFLUENZA APOS 2019
+#4.1_ IDADE
+influenza_old <- influenza_old %>%  
+  mutate(  
+    NU_IDADE_N = as.numeric(NU_IDADE_N),  
+    TIPO_IDADE = floor(NU_IDADE_N / 1000),  
+    VALOR_IDADE = NU_IDADE_N %% 1000,  
+    IDADE = case_when(  
+      TIPO_IDADE == 1 ~ VALOR_IDADE / 24,  # Horas para anos  
+      TIPO_IDADE == 2 ~ VALOR_IDADE / 365, # Dias para anos  
+      TIPO_IDADE == 3 ~ VALOR_IDADE / 12,  # Meses para anos  
+      TIPO_IDADE == 4 ~ VALOR_IDADE,     
+      TRUE ~ NA_real_  
+    )  
+  ) %>%  
+  filter(IDADE >= 18) %>%  
+  select(  
+    IDADE, everything(), -TIPO_IDADE, -VALOR_IDADE, -NU_IDADE_N  
+  )  
+n_row3 <- nrow(influenza_old)
+cat("\nNumero e registros >= 18 anos com SRAG de 2015 a 2018:", paste0(n_row3))
+
+influenza_old <-  influenza_old %>% 
+  filter(UTI ==1)
+
+n_row4 <- nrow(influenza_old)
+cat("\nNumero e registros >= 18 anos, apenas UTI e com SRAG de 2015 a 2018:", paste0(n_row4))
+
+influenza_old <- influenza_old %>% 
+  filter(EVOLUCAO %in% c(1,2))
+
+
+n_row5 <- nrow(influenza_old)
+cat("\nNumero e registros >= 18 anos, apenas UTI e, desfecho conhecido e com SRAG de 2015 a 2018:", paste0(n_row5))
+
+unique(influenza_old$EVOLUCAO)
+#4.2 SUPORTE VENTILATORIO
+influenza_old <- influenza_old %>%  
+  mutate(SUPORT_VEN = case_when(  
+    SUPORT_VEN == 1 ~ "No",  
+    SUPORT_VEN == 2 ~ "Yes, invasive",  
+    SUPORT_VEN == 3 ~ "Yes, non-invasive", 
+    TRUE ~ NA_character_  
+  ))  
+
+#4.3 CS_SEXO  
+influenza_old <- influenza_old %>%  
+  mutate(CS_SEXO = case_when(  
+    CS_SEXO == "F" ~ "Female",  
+    CS_SEXO == "M" ~ "Male",  
+    TRUE ~ NA_character_
+  ))
+
+#4.4 CS_ESCOLARIDADE
+influenza_old <- influenza_old %>%  
+  mutate(CS_ESCOL_N = case_when(
+    CS_ESCOL_N == "0" ~ "Illiterate",         # Analfabeto
+    CS_ESCOL_N == "1" ~ "Up to high school",  # Fundamental
+    CS_ESCOL_N == "2" ~ "High school",        # Médio
+    CS_ESCOL_N == "3" ~ "College/University", # Superior
+    TRUE ~ NA_character_                       # 9, 10 e outros viram NA
+  ))
+
+#4.5 CS_RACA
+influenza_old <- influenza_old %>%  
+  mutate(CS_RACA = case_when(CS_RACA == "1" ~ "White",
+                             CS_RACA == "2" ~ "Black/Brown",
+                             CS_RACA == "3" ~ "Asian",
+                             CS_RACA == "4" ~ "Black/Brown",
+                             CS_RACA == "5" ~ "Indigenous",
+                             TRUE ~ NA_character_
+  )) 
+
+#4.6 EVOLUCAO
+influenza_old <- influenza_old %>% 
+  mutate(EVOLUCAO = case_when(EVOLUCAO == 1 ~ "Discharge",
+                              EVOLUCAO == 2 ~ "Death",
+                              TRUE ~ NA_character_
+  ))
+
+
+unique(influenza_old$EVOLUCAO)
+#CRIANDO CIDADE ESTADO E REGIAO
+influenza_old <- influenza_old %>% 
+  mutate(
+    cidade = CO_MU_INTE,
+    estado = coalesce(SG_UF,SG_UF_NOT)
+  )
+
+influenza_old <- influenza_old %>%  
+  mutate(  
+    estado = as.character(SG_UF),  
+    regiao = case_when(  
+      estado %in% c("11", "12", "13", "14", "15", "16", "17") ~ "Norte",  
+      estado %in% c("21", "22", "23", "24", "25", "26", "27", "28", "29") ~ 
+        "Nordeste",  
+      estado %in% c("31", "32", "33", "35") ~ "Sudeste",  
+      estado %in% c("41", "42", "43") ~ "Sul",  
+      estado %in% c("50", "51", "52", "53") ~ "Centro-Oeste",  
+      TRUE ~ NA_character_
+    ))
+
+#CRIANDO INDICE
+influenza_old <- influenza_old %>% 
+  mutate(
+    indice = row_number()
+  )
+
+influenza_old_2 <- influenza_old %>% 
+  mutate(
+    DT_INTERNA = dmy(DT_INTERNA),
+    DT_SIN_PRI = dmy(DT_SIN_PRI),
+    DT_NOTIFIC = dmy(DT_NOTIFIC)
+    
+  )
+
+
+#CRIANDO TEMO DE SINTOMASS
+influenza_old_2$CO_MU_INTE = as.double(influenza_old_2$CO_MU_INTE)
+influenza_old_2 <- influenza_old_2 %>% 
+  mutate(
+    TIME_SYMPTOMS_HOSP = as.numeric(DT_INTERNA - DT_SIN_PRI),
+    TIME_SYMPTOMS_NOTIF = as.numeric(DT_NOTIFIC - DT_SIN_PRI)
+  ) %>% 
+  mutate(
+    TIME_SYMPTOMS_HOSP = ifelse(TIME_SYMPTOMS_HOSP < 0, NA, TIME_SYMPTOMS_HOSP),
+    TIME_SYMPTOMS_NOTIF = ifelse(TIME_SYMPTOMS_NOTIF < 0, NA, TIME_SYMPTOMS_NOTIF)
+  ) %>% 
+  #CRIANDO CAPITAL
+  left_join(
+    read_csv("https://raw.githubusercontent.com/kelvins/Municipios-Brasileiros/main/csv/municipios.csv") %>% 
+      mutate(codigo_ibge_6dig = as.numeric(str_sub(codigo_ibge, 1, 6))) %>%
+      select(capital, codigo_ibge_6dig), 
+    by = c("CO_MU_INTE" = "codigo_ibge_6dig")
+  ) %>% 
+  mutate(IS_CAPITAL = ifelse(capital == 1, "Yes", "No"))
+
+
+
+#Limitando sintomas a 60 dias
+influenza_old_2 <- influenza_old_2 %>%
+  mutate(
+    TIME_SYMPTOMS_HOSP = case_when(
+      TIME_SYMPTOMS_HOSP < 0 ~ NA_real_,
+      TIME_SYMPTOMS_HOSP > 60 ~ NA_real_,
+      TRUE ~ TIME_SYMPTOMS_HOSP
+    )
+  )
+#CONTAR COMORBIDADE
+
+comorbidades <-  c(
+  "CARDIOPATI", "HEPATICA", "METABOLICA", "NEUROLOGIC", "PNEUMOPATI", "RENAL", "IMUNODEPRE", 
+  "SIND_DOWN", "PUERPERA", "OUT_MORBI", "OBESIDADE"
+)
+
+#RECODIFICANDO AS COMORBIDADES
+influenza_old_3 <- influenza_old_2 %>% 
+  mutate_at(all_of(comorbidades), function(x) {case_when(x == 1 ~ "Yes", x == 2 ~ "No")})
+
+#CRIANDO CENARIO OTIMISTA ONDE OS NA SAO NAO
+influenza_old_4 <- influenza_old_3 %>% 
+  mutate_at(all_of(comorbidades), function(x){case_when(x == "Yes" ~ 1,
+                                                        TRUE ~ 0)}) %>%
+  mutate(
+    qtd_comorbidade = CARDIOPATI + HEPATICA + METABOLICA + NEUROLOGIC + PNEUMOPATI + RENAL + IMUNODEPRE 
+    + SIND_DOWN + PUERPERA + OUT_MORBI + OBESIDADE
+  )
+
+unique(influenza_old_4$RES_FLUA)
+unique(influenza_old_4$RES_FLUB)
+
+class(influenza_old_4$RES_FLUA)
+class(influenza_old_4$RES_FLUB)
+
+#CRIANDO COLUNA INFLUENZA
+# 1-Positivo 
+# 2-Negativo 
+# 3-Inconclusivo 
+# 4-Não realizado 
+# 9 - ignorado
+
+influenza_old_4 <- influenza_old_4 %>%
+  mutate(
+    RES_FLUA = as.numeric(RES_FLUA),
+    RES_FLUB = as.numeric(RES_FLUB)
+  ) %>%
+  mutate(
+    influenza = case_when(
+      RES_FLUA == 1 | RES_FLUB == 1 ~ 1,
+      (RES_FLUA != 1 & RES_FLUB != 1) &
+        (RES_FLUA == 2 | RES_FLUB == 2) ~ 0,
+      TRUE ~ NA_real_
+      # casos positivos nunca entram como 0
+      # casos negativos precisam ter pelo menos um teste negativo
+      # casos sem teste ficam NA
+      # Isso evita viés de classificação.
+    )
+  )
+
+
+
+
+
+unique(influenza_old_4$influenza)
+
+#VERIFICAR INCONSISTENCIA
+influenza_old_4 %>% 
+  filter(influenza == 0 & (RES_FLUA == 1 | RES_FLUB == 1))  
+
+
+influenza_old_4 %>% 
+  count(influenza, RES_FLUA, RES_FLUB)
+
+#FILTRANDO PARA APENAS INFLUENZA 1 e 0
+influenza_old_4 <- influenza_old_4 %>%
+  filter(!is.na(influenza))
+
+n_row6 <- nrow(influenza_old_4)
+cat("\nNumero e registros >= 18 anos, apenas UTI, somente influenza + e - e com SRAG de 2015 a 2018:", paste0(n_row6))
+
+influenza_old_4 %>% 
+  count(influenza, RES_FLUA, RES_FLUB)
+
+influenza_old_4 <- influenza_old_4%>%
+  mutate(codeteccao_casos =
+           ifelse(
+             (RES_FLUA == 1 | RES_FLUB == 1) &
+               (RES_VSR == 1 |
+                  RES_PARA1 == 1 |
+                  RES_PARA2 == 1 |
+                  RES_PARA3 == 1 |
+                  RES_ADNO == 1 |
+                  RES_OUTRO == 1),
+             1, 0))
+
+
+#SELECIONAR AS VARIAVEIS
+influenza_old_4 <- influenza_old_4%>% 
+  select(indice, regiao, estado, cidade, capital, NU_ANO, DT_NOTIFIC, DT_SIN_PRI, DT_COLETA, DT_INTERNA,
+         DT_ENTUTI, DT_SAIDUTI, DT_OBITO, TIME_SYMPTOMS_HOSP, CS_SEXO,
+         IDADE, CS_RACA, CS_ESCOL_N, SUPORT_VEN, EVOLUCAO, CARDIOPATI, #hematologica
+         HEPATICA, METABOLICA, NEUROLOGIC, PNEUMOPATI, RENAL, OBESIDADE,
+         IMUNODEPRE, SIND_DOWN, PUERPERA, OUT_MORBI, qtd_comorbidade, VACINA, influenza, codeteccao_casos
+         
+  )
+
+
+
+
+influenza_old_4 <-  influenza_old_4 %>% 
+  rename(
+    indice = indice, 
+    regiao = regiao,
+    estado = estado,
+    cidade = cidade, 
+    capital = capital,
+    ano = NU_ANO,
+    data_notificacao = DT_NOTIFIC,
+    data_sintomas = DT_SIN_PRI, 
+    data_coleta = DT_COLETA, 
+    data_internacao = DT_INTERNA,
+    data_ent_uti = DT_ENTUTI,
+    data_sai_uti = DT_SAIDUTI,
+    data_evolucao = DT_OBITO,
+    tempo_sintoma_hosp = TIME_SYMPTOMS_HOSP,
+    sexo = CS_SEXO,
+    idade = IDADE,
+    raca = CS_RACA,
+    escolaridade = CS_ESCOL_N,
+    suporte_vent = SUPORT_VEN,
+    evolucao = EVOLUCAO,
+    com_cardio = CARDIOPATI, 
+    # com_hemato = hematologi,
+    com_hepatica = HEPATICA,
+    com_diabetes = METABOLICA,
+    com_neuro = NEUROLOGIC,
+    com_pneumo = PNEUMOPATI,
+    com_renal = RENAL,
+    com_obesidade = OBESIDADE,
+    com_imunodepre = IMUNODEPRE,
+    # com_asma = asma,
+    com_sin_down = SIND_DOWN,
+    com_outras = OUT_MORBI,
+    puerpera = PUERPERA,
+    qtd_comorbidade = qtd_comorbidade,
+    vacina = VACINA,
+    influenza = influenza,
+    codeteccao = codeteccao_casos
+    
+    
+  )
+
+
+lista_nrow<- list(n_row1,n_row2,n_row3,n_row4,n_row5,n_row6)
+cat("\nFluxograma da compição amostral:", paste(lista_nrow))
+
+unique(influenza_old_4$evolucao)
+
+influenza_old_4 <- influenza_old_4 %>%
+  mutate(
+    
+    # character
+    estado = as.character(estado),
+    cidade = as.character(cidade),
+    vacina = as.character(vacina),
+    
+    # numeric
+    capital = as.numeric(capital),
+    ano = as.numeric(ano),
+    tempo_sintoma_hosp = as.numeric(tempo_sintoma_hosp),
+    
+    com_cardio = as.numeric(com_cardio),
+    com_hepatica = as.numeric(com_hepatica),
+    com_diabetes = as.numeric(com_diabetes),
+    com_neuro = as.numeric(com_neuro),
+    com_pneumo = as.numeric(com_pneumo),
+    com_renal = as.numeric(com_renal),
+    com_obesidade = as.numeric(com_obesidade),
+    com_imunodepre = as.numeric(com_imunodepre),
+    com_sin_down = as.numeric(com_sin_down),
+    puerpera = as.numeric(puerpera),
+    com_outras = as.numeric(com_outras),
+    qtd_comorbidade = as.numeric(qtd_comorbidade),
+    influenza = as.numeric(influenza),
+    codeteccao = as.numeric(codeteccao),
+    
+    # datas
+    data_notificacao = as.Date(data_notificacao),
+    data_sintomas = as.Date(data_sintomas),
+    data_coleta = as.Date(data_coleta),
+    data_internacao = as.Date(data_internacao),
+    data_ent_uti = as.Date(data_ent_uti),
+    data_sai_uti = as.Date(data_sai_uti),
+    data_evolucao = as.Date(data_evolucao)
+    
+  )
+
+skimr::skim(influenza_old_4)
+summary(influenza_old_4)
+
+library(DiagrammeR)
+
+grViz(
+  paste0(
+    "
+digraph fluxograma {
+
+graph [layout = dot, rankdir = TB]
+
+node [shape = box, style = filled, fillcolor = LightBlue]
+
+A [label = 'Base original\\nn = ", n_row1, "']
+B [label = 'Casos com critério SRAG\\nn = ", n_row2, "']
+C [label = 'Idade ≥ 18 anos\\nn = ", n_row3, "']
+D [label = 'Internação em UTI\\nn = ", n_row4, "']
+E [label = 'Desfecho conhecido\\nn = ", n_row5, "']
+F [label = 'Teste influenza válido\\nn = ", n_row6, "']
+
+A -> B
+B -> C
+C -> D
+D -> E
+E -> F
+
+}
+"
+  ))
+
+
+
+getwd()
+setwd("C:/Users/xgx/Documents/INFLUENZA_2026/INFLUENZA/data_/data_final")
+
+write.csv(
+  influenza_old_4,
+  "INFLUENZA_OLD.csv",
+  row.names = FALSE,
+  fileEncoding = "UTF-8"
+)
+
+
+# ===================PARTE 02 de 02===========================================================
+# EXTRAÇÃO E PADRONIZAÇÃO DE VARIÁVEIS – BASE INFLUENZA_FULL_FINAL_v2
+# Autor: Giovani B. Costa
+# Objetivo:
+# Este script realiza a extração e padronização de variáveis da base
+# consolidada "INFLUENZA_FULL_FINAL_v2.parquet", gerando uma base analítica
+# simplificada contendo apenas variáveis relevantes para análise
+# epidemiológica de casos de SRAG por influenza.
+#
+# Etapas do processamento:
+#
+# 1. Importação da base consolidada no formato Parquet.
+#
+# 2. Criação da variável "cidade", priorizando o município de residência
+#    (co_mun_res) e, quando ausente, utilizando o município de internação
+#    (co_mu_inte).
+#
+# 3. Seleção das variáveis de interesse relacionadas a:
+#      - características demográficas
+#      - localização geográfica
+#      - datas clínicas (notificação, sintomas, internação, UTI)
+#      - suporte ventilatório
+#      - evolução clínica
+#      - comorbidades
+#      - vacinação contra influenza
+#      - confirmação laboratorial de influenza
+#      - presença de codetecção viral
+#
+# 4. Padronização e renomeação das variáveis para nomes mais claros e
+#    consistentes na base analítica final.
+#
+# 5. Verificação exploratória de categorias da variável de desfecho.
+#
+# 6. Exportação da base final em formato CSV ("INFLUENZA_NEW.csv") para uso
+#    em análises estatísticas subsequentes.
+#=================================================================
+
+x <- read_parquet("C:/Users/xgx/Documents/INFLUENZA_2026/INFLUENZA/data_/data_final/INFLUENZA_FULL_FINAL_v2.parquet")
+
+x <- x %>% 
+  mutate(
+    cidade = coalesce(as.character(co_mun_res), as.character(co_mu_inte))
+    
+  )
+
+
+view(x)
+
+#limitando sintomas 60 dias
+x <- x %>%
+  mutate(
+    time_symptoms_hosp = case_when(
+      time_symptoms_hosp < 0 ~ NA_real_,
+      time_symptoms_hosp > 60 ~ NA_real_,
+      TRUE ~ time_symptoms_hosp
+    )
+  )
+
+x <-  x %>% 
+  select(index, regiao, sg_uf_internacao_final, cidade, capital, ano, dt_notific, dt_sin_pri, dt_coleta, dt_interna,
+         dt_entuti, dt_saiduti, dt_evoluca, time_symptoms_hosp, cs_sexo,
+         idade_anos, cs_raca, cs_escol_n, suport_ven, evolucao, cardiopati, # hematologi, asma,
+         hepatica, diabetes, neurologic, pneumopati, renal, obesidade,
+         imunodepre, sind_down, puerpera, out_morbi, cont_comorb, vacina, influenza_geral_casos, codeteccao_casos
+         
+  )
+
+class(x$influenza_geral_casos)
+
+
+view(x)
+
+x <-  x %>% 
+  rename(
+    indice = index, 
+    regiao = regiao,
+    estado = sg_uf_internacao_final,
+    cidade = cidade, 
+    capital = capital,
+    ano = ano,
+    data_notificacao = dt_notific,
+    data_sintomas = dt_sin_pri, 
+    data_coleta = dt_coleta, 
+    data_internacao = dt_interna,
+    data_ent_uti = dt_entuti,
+    data_sai_uti = dt_saiduti,
+    data_evolucao = dt_evoluca,
+    tempo_sintoma_hosp = time_symptoms_hosp,
+    sexo = cs_sexo,
+    idade = idade_anos,
+    raca = cs_raca,
+    escolaridade = cs_escol_n,
+    suporte_vent = suport_ven,
+    evolucao = evolucao,
+    com_cardio = cardiopati, 
+    #com_hemato = hematologi,
+    com_hepatica = hepatica,
+    com_diabetes = diabetes,
+    com_neuro = neurologic,
+    com_pneumo = pneumopati,
+    com_renal = renal,
+    com_obesidade = obesidade,
+    com_imunodepre = imunodepre,
+    #com_asma = asma,
+    com_sin_down = sind_down,
+    com_outras = out_morbi,
+    puerpera = puerpera,
+    qtd_comorbidade = cont_comorb,
+    vacina = vacina,
+    influenza = influenza_geral_casos,
+    codeteccao = codeteccao_casos
+    
+    
+  )
+
+unique(x$evolucao)
+
+#ETAPA DE VERIFICAÇÂO SE AMBOS DATASET POSSUEM AS MESMAS COLUNAS E DO MESMO TIPO ANTES D JUNTAR
+data.frame(
+  x = names(x),
+  influenza_old = names(influenza_old_4)
+)
+identical(names(x), names(influenza_old_4))
+all(names(x) == names(influenza_old_4))
+data.frame(
+  variavel = names(x),
+  classe_x = sapply(x, class),
+  classe_old = sapply(influenza_old_4, class)
+)
+
+
+hist(influenza_old_4$tempo_sintoma_hosp)
+
+
+dados_final <- bind_rows(x, influenza_old_4)
+
+
+
+getwd()
+setwd("C:/Users/xgx/Documents/INFLUENZA_2026/INFLUENZA/data_/data_final")
+
+write.csv(
+  x,
+  "INFLUENZA_NEW.csv",
+  row.names = FALSE,
+  fileEncoding = "UTF-8"
+)
+
+
+#RECRIAND O INDICE
+dados_final <- dados_final %>% 
+  mutate(
+    indice = row_number()
+  )
+
+
+write.csv(
+  dados_final,
+  "INFLUENZA_END.csv",
+  row.names = FALSE,
+  fileEncoding = "UTF-8"
+)
+
+view(dados_final)
+
+
+
+write.csv(
+  dados_final,
+  "INFLUENZA_NA.csv",
+  row.names = FALSE,
+  na = "",
+  fileEncoding = "UTF-8"
+)
+
